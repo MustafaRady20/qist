@@ -1,26 +1,113 @@
 @import "tailwindcss";
+@import "../styles/tokens.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/*
+ * Expose Qist tokens to Tailwind. Utilities follow the Figma token names:
+ * bg-navy, text-accent, border-border, bg-successBg, text-dangerText, ...
+ */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-navy: var(--qist-color-navy);
+  --color-navyHover: var(--qist-color-navyHover);
+  --color-accent: var(--qist-color-accent);
+  --color-accentHover: var(--qist-color-accentHover);
+
+  --color-bg: var(--qist-color-bg);
+  --color-surface: var(--qist-color-surface);
+  --color-text: var(--qist-color-text);
+  --color-secondary: var(--qist-color-secondary);
+  --color-muted: var(--qist-color-muted);
+  --color-border: var(--qist-color-border);
+
+  --color-success: var(--qist-color-success);
+  --color-warning: var(--qist-color-warning);
+  --color-danger: var(--qist-color-danger);
+  --color-info: var(--qist-color-info);
+  --color-whatsapp: var(--qist-color-whatsapp);
+
+  --color-successBg: var(--qist-color-successBg);
+  --color-warningBg: var(--qist-color-warningBg);
+  --color-dangerBg: var(--qist-color-dangerBg);
+  --color-infoBg: var(--qist-color-infoBg);
+  --color-accentBg: var(--qist-color-accentBg);
+
+  --color-successText: var(--qist-color-successText);
+  --color-warningText: var(--qist-color-warningText);
+  --color-dangerText: var(--qist-color-dangerText);
+  --color-infoText: var(--qist-color-infoText);
+  --color-navSelected: var(--qist-color-navSelected);
+
+  /* rounded-control (inputs, buttons, badges), rounded-card, rounded-modal */
+  --radius-control: var(--qist-radius-8);
+  --radius-card: var(--qist-radius-12);
+  --radius-modal: var(--qist-radius-16);
+  /* Dashboard panels (KPI, chart and table cards) use 16. */
+  --radius-panel: var(--qist-radius-16);
+
+  --shadow-card: 0 2px 8px rgb(20 33 61 / 0.04);
+
+  /* Tailwind's lg (1024) and xl (1280) already match the design breakpoints. */
+  --breakpoint-desktop: 90rem;
+
+  /* Inter first: it has no Arabic glyphs, so Arabic falls through to Noto Sans
+     Arabic. One stack therefore yields the AR/* and EN/* Figma styles. */
+  --font-sans: var(--font-inter), var(--font-noto-arabic), system-ui, sans-serif;
+
+  /* Type scale — Figma text styles AR/* and EN/* share sizes, differ by font. */
+  --text-display: 48px;
+  --text-display--line-height: 64px;
+  --text-display--font-weight: 700;
+  --text-h1: 28px;
+  --text-h1--line-height: 40px;
+  --text-h1--font-weight: 700;
+  --text-h2: 24px;
+  --text-h2--line-height: 36px;
+  --text-h2--font-weight: 700;
+  --text-h3: 20px;
+  --text-h3--line-height: 32px;
+  --text-h3--font-weight: 700;
+  --text-h4: 18px;
+  --text-h4--line-height: 28px;
+  --text-h4--font-weight: 500;
+  --text-body-lg: 16px;
+  --text-body-lg--line-height: 28px;
+  --text-body-lg--font-weight: 400;
+  --text-body: 14px;
+  --text-body--line-height: 24px;
+  --text-body--font-weight: 400;
+  --text-body-sm: 12px;
+  --text-body-sm--line-height: 20px;
+  --text-body-sm--font-weight: 400;
+  --text-label: 13px;
+  --text-label--line-height: 20px;
+  --text-label--font-weight: 500;
+  --text-caption: 12px;
+  --text-caption--line-height: 20px;
+  --text-caption--font-weight: 400;
+  --text-button: 14px;
+  --text-button--line-height: 24px;
+  --text-button--font-weight: 500;
+  --text-num-lg: 30px;
+  --text-num-lg--line-height: 40px;
+  --text-num-lg--font-weight: 700;
+  --text-num-sm: 16px;
+  --text-num-sm--line-height: 24px;
+  --text-num-sm--font-weight: 500;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+/*
+ * Numbers, phone numbers and references stay LTR inside RTL text, with
+ * tabular figures so amounts align in columns.
+ */
+@utility num {
+  direction: ltr;
+  unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--qist-color-bg);
+  color: var(--qist-color-text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 24px;
 }

@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: qist-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: qist
+      POSTGRES_USER: qist
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-qist_dev_password}
+      TZ: Africa/Cairo
+    ports:
+      - "5434:5432"
+    volumes:
+      - qist-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qist -d qist"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  qist-pgdata:

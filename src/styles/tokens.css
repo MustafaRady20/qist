@@ -1,0 +1,72 @@
+/*
+ * Qist design tokens — source of truth: Figma file ofYEaEonXS9vVKYfGRMXQQ
+ *   Colors (5:23), Foundations (5:2), Typography (5:131), Iconography (6:2).
+ * Color variable names mirror the Figma variables exactly; do not rename.
+ */
+:root {
+  /* Brand */
+  --qist-color-navy: #153638;
+  --qist-color-navyHover: #0f292b;
+  --qist-color-accent: #18816f;
+  --qist-color-accentHover: #106b5b;
+
+  /* Neutrals */
+  --qist-color-bg: #f5f7f6;
+  --qist-color-surface: #ffffff;
+  --qist-color-text: #193335;
+  --qist-color-secondary: #586b70;
+  --qist-color-muted: #829398;
+  --qist-color-border: #e1e8e6;
+
+  /* Status */
+  --qist-color-success: #12b76a;
+  --qist-color-warning: #f79009;
+  --qist-color-danger: #f04438;
+  --qist-color-info: #2e90fa;
+  --qist-color-whatsapp: #25d366;
+
+  /* Status backgrounds */
+  --qist-color-successBg: #ecfdf3;
+  --qist-color-warningBg: #fffaeb;
+  --qist-color-dangerBg: #fef3f2;
+  --qist-color-infoBg: #eff8ff;
+  --qist-color-accentBg: #e8f3ee;
+
+  /* Status text */
+  --qist-color-successText: #067647;
+  --qist-color-warningText: #93370d;
+  --qist-color-dangerText: #b42318;
+  --qist-color-infoText: #175cd3;
+  --qist-color-navSelected: #dcede5;
+
+  /* Spacing — 8px grid: 8 / 16 / 24 / 32 / 48 / 64 */
+  --qist-spacing-0: 0px;
+  --qist-spacing-8: 8px;
+  --qist-spacing-16: 16px;
+  --qist-spacing-24: 24px;
+  --qist-spacing-32: 32px;
+  --qist-spacing-48: 48px;
+  --qist-spacing-64: 64px;
+
+  /* Radius — inputs & buttons 8, cards 12, modals 16 */
+  --qist-radius-0: 0px;
+  --qist-radius-8: 8px;
+  --qist-radius-12: 12px;
+  --qist-radius-16: 16px;
+
+  /* Accessibility */
+  --qist-size-touch: 44px;
+
+  /* Layout — 1440: sidebar 240 + margin 32 + 12-col grid; 1280: sidebar 216;
+     1024: icon rail 80; 390: drawer sidebar, tables become cards. */
+  --qist-size-viewport-desktop: 1440px;
+  --qist-layout-margin: 32px;
+  --qist-layout-columns: 12;
+  --qist-sidebar-1440: 240px;
+  --qist-sidebar-1280: 216px;
+  --qist-sidebar-1024: 80px;
+
+  /* Icons — 24 × 24, 1.75px stroke, outline family (Hugeicons Stroke Rounded) */
+  --qist-icon-size: 24px;
+  --qist-icon-stroke: 1.75;
+}
