@@ -1,16 +1,18 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { DetailList, KpiGrid, Notice } from "@/components/page/blocks";
 import { DataTable, type Column } from "@/components/page/DataTable";
 import { KpiCard } from "@/components/page/KpiCard";
 import { Panel } from "@/components/page/Panel";
-import { Badge, Button, ButtonLink, DateField, Icon, SelectField, TextField, TextareaField } from "@/components/ui";
+import { Badge, Button, ButtonLink, DateField, Icon, Radio, SelectField, TextField, TextareaField } from "@/components/ui";
 import { cn } from "@/lib/cn";
 import { activeContractsLabel, formatAmount, formatDate, formatPercent, installmentsCountLabel, parseAmount } from "@/lib/format";
+import { customAmountsError, profitBaseLabels } from "@/lib/installments";
 import type { ContractInput } from "@/server/contracts/service";
-import { addMonths, buildFlatSchedule, type Schedule, type ScheduleRow } from "@/server/finance/schedule";
+import type { ProfitBase } from "@/server/db/schema";
+import { addMonths, buildFlatSchedule, type CustomInstallment, type Schedule, type ScheduleRow } from "@/server/finance/schedule";
 import { saveContractAction, searchCustomersAction, type CustomerOption } from "./actions";
 
 export type RuleOption = {
@@ -31,9 +33,11 @@ export type WizardDraft = {
   purchaseCost: number;
   downPayment: number;
   financeRuleId: string;
+  profitBase: ProfitBase;
   termMonths: number;
   fees: number;
   firstDueDate: string;
+  customInstallments: CustomInstallment[];
 };
 
 const steps = ["العميل", "بيانات الشراء", "المقدم", "خطة التقسيط", "جدول الأقساط", "المراجعة"];
@@ -47,15 +51,22 @@ const fieldStep: Record<string, number> = {
   purchaseCost: 2,
   downPayment: 3,
   financeRuleId: 4,
+  profitBase: 4,
   termMonths: 4,
   fees: 4,
   firstDueDate: 4,
+  customInstallments: 5,
+};
+
+const profitBaseHints: Record<ProfitBase, string> = {
+  principal: "النسبة تُطبّق على المبلغ المموّل فقط (السعر − المقدم).",
+  purchase_cost: "النسبة تُطبّق على سعر المنتج كاملًا قبل خصم المقدم. المقدم لا يدخل في الأقساط.",
 };
 
 const money = (p: number) => formatAmount(p);
 const editable = (p: number) => (p % 100 === 0 ? String(p / 100) : (p / 100).toFixed(2));
 
-const scheduleColumns: Column<ScheduleRow>[] = [
+const baseScheduleColumns: Column<ScheduleRow>[] = [
   { key: "seq", header: "#", cell: (r) => r.seq, numeric: true },
   { key: "due", header: "الاستحقاق", cell: (r) => formatDate(r.dueDate) },
   { key: "opening", header: "أصل افتتاحي", cell: (r) => money(r.openingPrincipal), numeric: true },
@@ -66,6 +77,8 @@ const scheduleColumns: Column<ScheduleRow>[] = [
   { key: "closing", header: "أصل ختامي", cell: (r) => money(r.closingPrincipal), numeric: true },
   { key: "status", header: "الحالة", cell: () => <Badge status="upcoming" /> },
 ];
+/** Position of the manual-amount column: right after the installment amount. */
+const manualColumnIndex = baseScheduleColumns.findIndex((c) => c.key === "amount") + 1;
 
 /** Figma "wizard-1" … "wizard-6". The server recomputes and validates the plan on save. */
 export function ContractWizard({
@@ -91,9 +104,14 @@ export function ContractWizard({
   const [supplier, setSupplier] = useState(draft?.supplier ?? "");
   const [down, setDown] = useState(draft ? editable(draft.downPayment) : "0");
   const [ruleId, setRuleId] = useState(rules.some((r) => r.id === draft?.financeRuleId) ? draft!.financeRuleId : (rules[0]?.id ?? ""));
+  const [base, setBase] = useState<ProfitBase>(draft?.profitBase ?? "principal");
   const [months, setMonths] = useState(String(draft?.termMonths ?? 12));
   const [fees, setFees] = useState(draft ? editable(draft.fees) : "0");
   const [firstDue, setFirstDue] = useState(draft && draft.firstDueDate > today ? draft.firstDueDate : addMonths(today, 1));
+  /** Typed manual installment amounts by installment number; empty means calculated. */
+  const [manual, setManual] = useState<Record<number, string>>(() =>
+    Object.fromEntries((draft?.customInstallments ?? []).map((c) => [c.seq, editable(c.amount)])),
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [serverError, setServerError] = useState<string>();
   const [pending, startTransition] = useTransition();
@@ -104,6 +122,13 @@ export function ContractWizard({
   const feesP = parseAmount(fees);
   const qty = /^\d+$/.test(quantity.trim()) ? Number(quantity) : NaN;
   const term = /^\d+$/.test(months.trim()) ? Number(months) : NaN;
+
+  // Amounts typed for installments beyond the current term are ignored.
+  const manualEntries = Object.entries(manual)
+    .map(([seq, text]) => ({ seq: Number(seq), text: text.trim() }))
+    .filter((m) => m.text && m.seq <= term);
+  const manualInvalid = manualEntries.some((m) => !parseAmount(m.text));
+  const custom: CustomInstallment[] | null = manualInvalid ? null : manualEntries.map((m) => ({ seq: m.seq, amount: parseAmount(m.text)! }));
 
   /** Client-side checks for one step; the same rules are enforced again by the server. */
   const check = (n: number): Record<string, string> => {
@@ -135,20 +160,71 @@ export function ContractWizard({
       if (feesP === null) e.fees = "أدخل الرسوم (0 إن لم توجد)";
       if (!firstDue || firstDue <= today) e.firstDueDate = "أول استحقاق يجب أن يكون بعد اليوم";
     }
+    if (n === 5 && manualEntries.length) {
+      if (manualInvalid) e.customInstallments = "أدخل مبالغ الأقساط اليدوية بأرقام أكبر من صفر، أو اترك الخانة فارغة للحساب التلقائي";
+      else if (autoSchedule && custom) {
+        const error = customAmountsError(autoSchedule.total, autoSchedule.rows.length, custom.map((c) => c.amount));
+        if (error) e.customInstallments = error;
+        else if (!schedule) e.customInstallments = "تعذر حساب جدول الأقساط بهذه القيم. راجع المبالغ اليدوية.";
+      }
+    }
     return e;
   };
 
-  const firstInvalid = (upTo: number) => [1, 2, 3, 4].filter((n) => n <= upTo).find((n) => Object.keys(check(n)).length);
-  const planReady = firstInvalid(4) === undefined;
-
-  const schedule: Schedule | null = useMemo(() => {
-    if (!rule || !costP || downP === null || feesP === null || !(term >= 1) || downP >= costP) return null;
+  /** The plan input shared by both schedules below; null until steps 2–4 are filled in. */
+  const planInput =
+    !rule || !costP || downP === null || feesP === null || !(term >= 1) || downP >= costP
+      ? null
+      : {
+          principal: costP - downP,
+          profitOn: base === "purchase_cost" ? costP : costP - downP,
+          annualRateBp: rule.annualRateBp,
+          termMonths: term,
+          fees: feesP,
+          firstDueDate: firstDue,
+        };
+  const build = (customInstallments: CustomInstallment[]): Schedule | null => {
     try {
-      return buildFlatSchedule({ principal: costP - downP, annualRateBp: rule.annualRateBp, termMonths: term, fees: feesP, firstDueDate: firstDue });
+      return planInput && buildFlatSchedule({ ...planInput, customInstallments });
     } catch {
       return null;
     }
-  }, [rule, costP, downP, feesP, term, firstDue]);
+  };
+  /** Fully calculated schedule: what the plan gives before any manual amount. */
+  const autoSchedule = build([]);
+  /** The schedule that will be saved; null while the manual amounts don't add up. */
+  const schedule = custom && build(custom);
+  /** What steps 4–5 show: the saved schedule, or the calculated one while manual amounts are being fixed. */
+  const preview = schedule ?? autoSchedule;
+
+  const firstInvalid = (upTo: number) => [1, 2, 3, 4, 5].filter((n) => n <= upTo).find((n) => Object.keys(check(n)).length);
+  const planReady = firstInvalid(5) === undefined;
+  const manualError = step === 5 ? check(5).customInstallments : undefined;
+
+  const scheduleColumns: Column<ScheduleRow>[] = [
+    ...baseScheduleColumns.slice(0, manualColumnIndex),
+    {
+      key: "manual",
+      header: "تحديد يدوي (جنيه)",
+      cell: (r) => {
+        const text = manual[r.seq] ?? "";
+        return (
+          <input
+            type="text"
+            inputMode="decimal"
+            dir="ltr"
+            aria-label={`مبلغ القسط ${r.seq} يدويًا`}
+            aria-invalid={text.trim() && !parseAmount(text) ? true : undefined}
+            placeholder="تلقائي"
+            value={text}
+            onChange={(e) => setManual((m) => ({ ...m, [r.seq]: e.target.value }))}
+            className="num text-body h-11 w-28 rounded-control border border-border bg-surface px-2 text-right outline-none placeholder:text-muted focus:border-info aria-invalid:border-danger"
+          />
+        );
+      },
+    },
+    ...baseScheduleColumns.slice(manualColumnIndex),
+  ];
 
   const goTo = (n: number) => {
     const invalid = firstInvalid(n - 1);
@@ -163,7 +239,7 @@ export function ContractWizard({
   };
 
   const save = (confirm: boolean) => {
-    const invalid = firstInvalid(4);
+    const invalid = firstInvalid(5);
     if (invalid !== undefined || !customer || !rule) {
       if (invalid !== undefined) {
         setErrors(check(invalid));
@@ -179,9 +255,11 @@ export function ContractWizard({
       purchaseCost: costP!,
       downPayment: downP!,
       financeRuleId: rule.id,
+      profitBase: base,
       termMonths: term,
       fees: feesP!,
       firstDueDate: firstDue,
+      customInstallments: custom ?? [],
     };
     setServerError(undefined);
     startTransition(async () => {
@@ -192,7 +270,7 @@ export function ContractWizard({
       }
       const fields = result.fieldErrors ?? {};
       const target = Object.keys(fields)
-        .map((f) => fieldStep[f])
+        .map((f) => fieldStep[f.split(".")[0]])
         .filter(Boolean)
         .sort()[0];
       setErrors(fields);
@@ -307,6 +385,15 @@ export function ContractWizard({
                 </SelectField>
                 <TextField label="النسبة السنوية" kind="currency" value={rule ? formatPercent(rule.annualRateBp / 100) : ""} readOnly disabled />
                 <TextField label="طريقة الحساب" value="Flat Rate — ثابت" readOnly disabled />
+                <fieldset className="flex flex-col gap-2 md:col-span-2">
+                  <legend className="text-label mb-2 text-secondary">النسبة تُحسب على</legend>
+                  <div className="flex flex-wrap gap-3">
+                    {(Object.keys(profitBaseLabels) as ProfitBase[]).map((value) => (
+                      <Radio key={value} name="profitBase" value={value} label={profitBaseLabels[value]} checked={base === value} onChange={() => setBase(value)} />
+                    ))}
+                  </div>
+                  <p className="text-caption text-secondary">{profitBaseHints[base]}</p>
+                </fieldset>
                 <TextField
                   label={rule ? `المدة بالأشهر (${rule.minTermMonths}–${rule.maxTermMonths})` : "المدة بالأشهر"}
                   kind="currency"
@@ -323,21 +410,21 @@ export function ContractWizard({
             )}
           </Panel>
           <Notice>قاعدة قابلة للتعديل من الإعدادات حسب الصلاحية. العقود تحتفظ بإصدار القاعدة وقت الإنشاء. الرصيد المتناقص غير متاح حاليًا.</Notice>
-          {schedule && rule && (
+          {preview && planInput && rule && (
             <Panel title="معاينة الحساب">
               <DetailList
                 items={[
                   {
-                    label: "العائد = الأصل × النسبة السنوية × الأشهر ÷ 12",
+                    label: `العائد = ${base === "purchase_cost" ? "سعر المنتج كاملًا" : "الأصل بعد المقدم"} × النسبة السنوية × الأشهر ÷ 12`,
                     value: (
                       <span className="num">
-                        {formatAmount(schedule.principal, { whole: schedule.principal % 100 === 0 })} × {formatPercent(rule.annualRateBp / 100)} × {term} ÷ 12
+                        {formatAmount(planInput.profitOn, { whole: planInput.profitOn % 100 === 0 })} × {formatPercent(rule.annualRateBp / 100)} × {term} ÷ 12
                       </span>
                     ),
                   },
-                  { label: "عائد التمويل", value: <span className="num">{money(schedule.profit)}</span> },
-                  { label: "إجمالي الأقساط دون المقدم", value: <span className="num">{money(schedule.total)}</span> },
-                  { label: "القسط الشهري التقريبي", value: <span className="num">{money(schedule.installment)}</span> },
+                  { label: "عائد التمويل", value: <span className="num">{money(preview.profit)}</span> },
+                  { label: "إجمالي الأقساط دون المقدم", value: <span className="num">{money(preview.total)}</span> },
+                  { label: "القسط الشهري التقريبي", value: <span className="num">{money(preview.installment)}</span> },
                 ]}
               />
             </Panel>
@@ -345,24 +432,41 @@ export function ContractWizard({
         </>
       )}
 
-      {step === 5 && schedule && (
+      {step === 5 && preview && (
         <>
-          <Panel title={`الجدول الكامل • ${installmentsCountLabel(schedule.rows.length)}`}>
-            <DataTable caption="جدول الأقساط" columns={scheduleColumns} rows={schedule.rows} rowKey={(r) => String(r.seq)} />
+          <Notice>
+            اكتب مبلغ أي قسط في عمود «تحديد يدوي» لتثبيته. الأقساط التي تتركها فارغة تُحسب تلقائيًا بتوزيع المتبقي من إجمالي الأقساط عليها بالتساوي.
+          </Notice>
+          {manualError && <Notice tone="danger">{manualError}</Notice>}
+          <Panel title={`الجدول الكامل • ${installmentsCountLabel(preview.rows.length)}`}>
+            <DataTable caption="جدول الأقساط" columns={scheduleColumns} rows={preview.rows} rowKey={(r) => String(r.seq)} />
+            {manualEntries.length > 0 && (
+              <div>
+                <Button variant="outline" onClick={() => setManual({})}>
+                  مسح المبالغ اليدوية
+                </Button>
+              </div>
+            )}
           </Panel>
           <Notice tone="success">
-            إجمالي الأصل <span className="num">{money(schedule.principal)}</span> + العائد <span className="num">{money(schedule.profit)}</span>
-            {schedule.fees > 0 && (
+            إجمالي الأصل <span className="num">{money(preview.principal)}</span> + العائد <span className="num">{money(preview.profit)}</span>
+            {preview.fees > 0 && (
               <>
                 {" "}
-                + الرسوم <span className="num">{money(schedule.fees)}</span>
+                + الرسوم <span className="num">{money(preview.fees)}</span>
               </>
             )}{" "}
-            = <span className="num">{money(schedule.total)}</span> جنيه.
-            {schedule.rows.at(-1)!.amount !== schedule.installment && (
+            = <span className="num">{money(preview.total)}</span> جنيه.
+            {manualEntries.length === 0 && preview.rows.at(-1)!.amount !== preview.installment && (
               <>
                 {" "}
-                فرق التقريب مُسوّى في القسط الأخير (<span className="num">{money(schedule.rows.at(-1)!.amount)}</span>).
+                فرق التقريب مُسوّى في القسط الأخير (<span className="num">{money(preview.rows.at(-1)!.amount)}</span>).
+              </>
+            )}
+            {schedule && manualEntries.length > 0 && manualEntries.length < schedule.rows.length && (
+              <>
+                {" "}
+                {installmentsCountLabel(manualEntries.length)} يدويًا، والباقي <span className="num">{money(schedule.installment)}</span> للقسط.
               </>
             )}
           </Notice>
@@ -387,10 +491,12 @@ export function ContractWizard({
                 { label: "المقدم", value: <span className="num">{money(downP!)}</span> },
                 { label: "أصل التمويل", value: <span className="num">{money(schedule.principal)}</span> },
                 { label: "العائد", value: <span className="num">{money(schedule.profit)}</span> },
+                { label: "العائد محسوب على", value: profitBaseLabels[base] },
                 { label: "الرسوم", value: <span className="num">{money(schedule.fees)}</span> },
                 { label: "إجمالي الأقساط", value: <span className="num">{money(schedule.total)}</span> },
                 { label: "سعر البيع بالتقسيط", value: <span className="num">{money(downP! + schedule.total)}</span> },
                 { label: "أول قسط / عدد الأقساط", value: `${formatDate(firstDue)} / ${schedule.rows.length}` },
+                { label: "أقساط محددة يدويًا", value: manualEntries.length ? installmentsCountLabel(manualEntries.length) : "لا يوجد — الحساب تلقائي" },
               ]}
             />
           </Panel>

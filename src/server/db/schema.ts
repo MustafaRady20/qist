@@ -18,6 +18,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { CustomInstallment } from "../finance/schedule";
 
 /*
  * Conventions
@@ -178,6 +179,9 @@ export const storedFiles = pgTable("stored_files", {
 
 export const financeMethod = pgEnum("finance_method", ["flat"]);
 
+/** What the rate is charged on: the financed amount (price − down payment) or the full price. */
+export const profitBase = pgEnum("profit_base", ["principal", "purchase_cost"]);
+
 export const financeRules = pgTable(
   "finance_rules",
   {
@@ -271,12 +275,16 @@ export const contracts = pgTable(
     // Snapshot of the plan at creation; the rule version may change later.
     principal: money("principal").notNull(),
     annualRateBp: integer("annual_rate_bp").notNull(),
+    /** Chosen per contract in the wizard, not by the plan. */
+    profitBase: profitBase("profit_base").notNull().default("principal"),
     termMonths: smallint("term_months").notNull(),
     installmentCount: smallint("installment_count").notNull(),
     fees: money("fees").notNull().default(0),
     profit: money("profit").notNull(),
     totalInstallments: money("total_installments").notNull(),
     firstDueDate: date("first_due_date").notNull(),
+    /** Installments whose amount was set by hand; the rest of the schedule is calculated. */
+    customInstallments: jsonb("custom_installments").$type<CustomInstallment[]>().notNull().default([]),
 
     createdBy: uuid("created_by").references(() => users.id),
     confirmedBy: uuid("confirmed_by").references(() => users.id),
@@ -371,6 +379,7 @@ export type Customer = typeof customers.$inferSelect;
 export type CustomerDocument = typeof customerDocuments.$inferSelect;
 export type DocumentKind = (typeof documentKind.enumValues)[number];
 export type FinanceRule = typeof financeRules.$inferSelect;
+export type ProfitBase = (typeof profitBase.enumValues)[number];
 export type Contract = typeof contracts.$inferSelect;
 export type ContractStatus = (typeof contractStatus.enumValues)[number];
 export type Installment = typeof installments.$inferSelect;

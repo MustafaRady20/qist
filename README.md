@@ -12,8 +12,7 @@ npm install
 cp .env.example .env.local    # then set SEED_ADMIN_PASSWORD (≥ 10 chars)
 npm run db:up                 # Postgres 16 on localhost:5434
 npm run db:migrate
-npm run db:seed               # admin user + finance rules
-npm run db:seed:demo          # optional: demo customers/contracts from the Figma screens
+npm run db:seed               # admin user only; add installment plans from Settings
 npm run dev
 ```
 
@@ -77,7 +76,8 @@ convenience redirect). Rules the code enforces:
 - **Contract groups** are a follow-up label only: grouped contracts stay active with their own schedules. The `consolidated` list tab filters on group membership; a group dissolves itself when fewer than two active contracts remain.
 - **Collection is measured against due dates.** Installment payments have no date of their own until the payments module exists, so the dashboard and reports count "collected in a month" as what has been paid on the installments falling due in that month. Paid money covers fees, then profit, then principal.
 - **Reports** compare each period with the one before it (whole months step back by months, other ranges by their length) and export as CSV with amounts in pounds.
-- **Schedule:** profit = principal × annual rate × months ÷ 12; installments rounded to the piastre, rounding difference in the last one.
+- **Schedule:** profit = profit base × annual rate × months ÷ 12, where the base is chosen per contract in the wizard (`contracts.profit_base`): the principal (price − down payment) or the full purchase cost. Installments are rounded to the piastre, rounding difference in the last one.
+- **Manual installments:** a contract may fix the amount of any installment (`contracts.custom_installments`, `customInstallments: [{ seq, amount }]` in the API); the others share what is left of the total equally. Profit and fees are then spread in proportion to each installment's amount.
 
 ### Roles
 

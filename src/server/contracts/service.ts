@@ -1,6 +1,7 @@
 import "server-only";
 import { asc, eq, sql, type SQL } from "drizzle-orm";
 import { z } from "zod";
+import { customAmountsError } from "@/lib/installments";
 import { recordAudit } from "@/server/audit";
 import { requirePermission } from "@/server/auth/dal";
 import { db, type Tx } from "@/server/db";
@@ -11,18 +12,20 @@ import {
   customers,
   financeRules,
   installments,
+  profitBase,
   type Contract,
   type FinanceRule,
+  type ProfitBase,
 } from "@/server/db/schema";
 import { AppError, notFound } from "@/server/errors";
-import { buildFlatSchedule, type Schedule } from "@/server/finance/schedule";
+import { buildFlatSchedule, flatProfit, type Schedule } from "@/server/finance/schedule";
 import { getUsableRule } from "@/server/finance-rules/service";
 import { todayInCairo } from "@/server/time";
 import { isoDateSchema, moneySchema, optionalText, PAGE_SIZE } from "@/server/validation";
 
 // ── Validation ──────────────────────────────────────────────────────────────
 
-/** Wizard steps 1–4 (customer, purchase, down payment, plan). Money in piastres. */
+/** Wizard steps 1–5 (customer, purchase, down payment, plan, manual installments). Money in piastres. */
 export const contractInputSchema = z.object({
   customerId: z.uuid({ error: "اختر العميل" }),
   productDescription: z.string().trim().min(2, { error: "أدخل المنتج ومواصفاته" }).max(300),
@@ -31,9 +34,17 @@ export const contractInputSchema = z.object({
   purchaseCost: moneySchema.min(1, { error: "أدخل تكلفة الشراء" }),
   downPayment: moneySchema.default(0),
   financeRuleId: z.uuid({ error: "اختر خطة التقسيط" }),
+  /** What the plan's rate is charged on: the financed amount, or the full price before the down payment. */
+  profitBase: z.enum(profitBase.enumValues).default("principal"),
   termMonths: z.number().int().min(1).max(120),
   fees: moneySchema.default(0),
   firstDueDate: isoDateSchema,
+  /** Installments set by hand; the others are calculated from what is left of the total. */
+  customInstallments: z
+    .array(z.object({ seq: z.number().int().min(1).max(120), amount: moneySchema.min(1, { error: "مبلغ القسط اليدوي يجب أن يكون أكبر من صفر" }) }))
+    .max(120)
+    .refine((list) => new Set(list.map((c) => c.seq)).size === list.length, { error: "قسط محدد يدويًا أكثر من مرة" })
+    .default([]),
 });
 export type ContractInput = z.input<typeof contractInputSchema>;
 
@@ -46,6 +57,8 @@ export type ContractPlan = {
   downPayment: number;
   principal: number;
   annualRateBp: number;
+  /** What the rate was charged on. */
+  profitBase: ProfitBase;
   termMonths: number;
   installmentCount: number;
   fees: number;
@@ -70,18 +83,35 @@ function computePlan(data: ParsedInput, rule: FinanceRule, today: string): Contr
   if (Object.keys(errors).length) throw new AppError("validation", "راجع بيانات العقد", { fieldErrors: errors });
 
   const principal = data.purchaseCost - data.downPayment;
-  const schedule = buildFlatSchedule({
-    principal,
-    annualRateBp: rule.annualRateBp,
-    termMonths: data.termMonths,
-    fees: data.fees,
-    firstDueDate: data.firstDueDate,
-  });
+  const profitOn = data.profitBase === "purchase_cost" ? data.purchaseCost : principal;
+  const total = principal + flatProfit(profitOn, rule.annualRateBp, data.termMonths) + data.fees;
+  const customError = data.customInstallments.some((c) => c.seq > data.termMonths)
+    ? "يوجد قسط يدوي خارج مدة العقد"
+    : customAmountsError(total, data.termMonths, data.customInstallments.map((c) => c.amount));
+  if (customError) throw new AppError("validation", customError, { fieldErrors: { customInstallments: customError } });
+
+  let schedule: Schedule;
+  try {
+    schedule = buildFlatSchedule({
+      principal,
+      profitOn,
+      annualRateBp: rule.annualRateBp,
+      termMonths: data.termMonths,
+      fees: data.fees,
+      firstDueDate: data.firstDueDate,
+      customInstallments: data.customInstallments,
+    });
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error;
+    const message = "تعذر حساب جدول الأقساط بهذه القيم. راجع المبالغ اليدوية.";
+    throw new AppError("validation", message, { fieldErrors: { customInstallments: message } });
+  }
   return {
     purchaseCost: data.purchaseCost,
     downPayment: data.downPayment,
     principal,
     annualRateBp: rule.annualRateBp,
+    profitBase: data.profitBase,
     termMonths: data.termMonths,
     installmentCount: schedule.rows.length,
     fees: data.fees,
@@ -302,7 +332,12 @@ export async function getContract(idOrCode: string) {
 
   const [contract] = await db.select().from(contracts).where(eq(contracts.id, row.id));
   const [rule] = await db
-    .select({ key: financeRules.key, name: financeRules.name, version: financeRules.version, settlementPolicy: financeRules.settlementPolicy })
+    .select({
+      key: financeRules.key,
+      name: financeRules.name,
+      version: financeRules.version,
+      settlementPolicy: financeRules.settlementPolicy,
+    })
     .from(financeRules)
     .where(eq(financeRules.id, contract.financeRuleId));
   const [group] = contract.groupId
@@ -364,12 +399,14 @@ function planColumns(plan: ContractPlan, data: ParsedInput) {
     downPayment: plan.downPayment,
     principal: plan.principal,
     annualRateBp: plan.annualRateBp,
+    profitBase: plan.profitBase,
     termMonths: plan.termMonths,
     installmentCount: plan.installmentCount,
     fees: plan.fees,
     profit: plan.schedule.profit,
     totalInstallments: plan.schedule.total,
     firstDueDate: data.firstDueDate,
+    customInstallments: [...data.customInstallments].sort((a, b) => a.seq - b.seq),
   };
 }
 
@@ -398,10 +435,12 @@ function contractAudit(c: Contract) {
     downPayment: c.downPayment,
     principal: c.principal,
     profit: c.profit,
+    profitBase: c.profitBase,
     fees: c.fees,
     total: c.totalInstallments,
     termMonths: c.termMonths,
     firstDueDate: c.firstDueDate,
+    customInstallments: c.customInstallments,
     financeRuleId: c.financeRuleId,
   };
 }
@@ -489,9 +528,11 @@ export async function confirmDraft(idOrCode: string) {
       purchaseCost: draft.purchaseCost,
       downPayment: draft.downPayment,
       financeRuleId: draft.financeRuleId,
+      profitBase: draft.profitBase,
       termMonths: draft.termMonths,
       fees: draft.fees,
       firstDueDate: draft.firstDueDate,
+      customInstallments: draft.customInstallments,
     });
     const plan = computePlan(data, await getUsableRule(draft.financeRuleId, today, tx), today);
 

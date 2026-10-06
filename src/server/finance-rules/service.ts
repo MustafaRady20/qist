@@ -18,10 +18,22 @@ export async function listFinanceRules(): Promise<FinanceRule[]> {
     .orderBy(financeRules.key, desc(financeRules.version));
 }
 
-/** Every version of one rule, newest first (Figma "finance-versions"). */
-export async function listRuleVersions(key: string) {
+/** Every version of one rule (or of all rules), newest first (Figma "finance-versions"). */
+export async function listRuleVersions(key?: string) {
   await requirePermission("finance-rules:read");
-  return db.select().from(financeRules).where(eq(financeRules.key, key)).orderBy(desc(financeRules.version));
+  return db
+    .select()
+    .from(financeRules)
+    .where(key ? eq(financeRules.key, key) : undefined)
+    .orderBy(financeRules.key, desc(financeRules.version));
+}
+
+/** Latest version of one rule, the one an edit starts from. */
+export async function getLatestRule(key: string): Promise<FinanceRule> {
+  await requirePermission("finance-rules:read");
+  const [rule] = await db.select().from(financeRules).where(eq(financeRules.key, key)).orderBy(desc(financeRules.version)).limit(1);
+  if (!rule) throw notFound("قاعدة التمويل");
+  return rule;
 }
 
 /** Rules a new contract may use today. */
@@ -102,6 +114,35 @@ export async function createRuleVersion(input: z.input<typeof ruleVersionSchema>
       tx,
     );
     return created;
+  });
+}
+
+/**
+ * Stops a rule for new contracts, or brings its latest version back. Contracts
+ * already on the rule are not affected.
+ */
+export async function setRuleActive(key: string, active: boolean) {
+  const actor = await requirePermission("finance-rules:write");
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`finance_rule:${key}`}))`);
+    const [latest] = await tx.select().from(financeRules).where(eq(financeRules.key, key)).orderBy(desc(financeRules.version)).limit(1);
+    if (!latest) throw notFound("قاعدة التمويل");
+    if (latest.isActive === active) return latest;
+
+    const [updated] = await tx.update(financeRules).set({ isActive: active }).where(eq(financeRules.id, latest.id)).returning();
+    await recordAudit(
+      {
+        actorId: actor.id,
+        action: active ? "تفعيل قاعدة تمويل" : "إيقاف قاعدة تمويل",
+        entityType: "finance_rule",
+        entityId: latest.id,
+        ref: `${latest.name} • v${latest.version}`,
+        before: { isActive: latest.isActive },
+        after: { isActive: active },
+      },
+      tx,
+    );
+    return updated;
   });
 }
 

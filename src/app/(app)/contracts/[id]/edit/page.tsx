@@ -42,9 +42,11 @@ export default async function EditDraftPage({ params }: PageProps<"/contracts/[i
           purchaseCost: c.purchaseCost,
           downPayment: c.downPayment,
           financeRuleId: c.financeRuleId,
+          profitBase: c.profitBase,
           termMonths: c.termMonths,
           fees: c.fees,
           firstDueDate: c.firstDueDate,
+          customInstallments: c.customInstallments,
         }}
       />
     </>

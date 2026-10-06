@@ -9,6 +9,7 @@ import { Panel } from "@/components/page/Panel";
 import { pickTab, SegmentedTabs } from "@/components/page/SegmentedTabs";
 import { Badge, ButtonLink } from "@/components/ui";
 import { formatAmount, formatDate, formatPercent, installmentsCountLabel } from "@/lib/format";
+import { profitBaseLabels } from "@/lib/installments";
 import { paymentMethodLabels } from "@/lib/payments";
 import { requirePageUser } from "@/server/auth/dal";
 import { can } from "@/server/auth/permissions";
@@ -195,7 +196,14 @@ export default async function ContractDetailPage({ params, searchParams }: PageP
               { label: "المقدم", value: num(money(c.downPayment)) },
               { label: "سعر البيع بالتقسيط", value: num(money(c.downPayment + c.totalInstallments)) },
               { label: "خطة التقسيط", value: <>{c.rule.name} • {num(rate)} سنوي ثابت • الإصدار {num(String(c.rule.version))}</> },
+              { label: "العائد محسوب على", value: profitBaseLabels[c.profitBase] },
               { label: "أول قسط / عدد الأقساط", value: `${formatDate(c.firstDueDate)} / ${c.installmentCount}` },
+              {
+                label: "أقساط محددة يدويًا",
+                value: c.customInstallments.length
+                  ? num(c.customInstallments.map((i) => `#${i.seq}: ${money(i.amount)}`).join(" • "))
+                  : "لا يوجد — الحساب تلقائي",
+              },
             ]}
           />
         </Panel>
