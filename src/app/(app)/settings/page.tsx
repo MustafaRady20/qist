@@ -12,6 +12,7 @@ import { can } from "@/server/auth/permissions";
 import type { FinanceRule } from "@/server/db/schema";
 import { listFinanceRules } from "@/server/finance-rules/service";
 import { formatDate, formatPercent } from "@/lib/format";
+import { RuleStatusButton } from "./finance-rules/RuleStatusButton";
 
 export const metadata: Metadata = { title: "الإعدادات · قسط" };
 
@@ -55,6 +56,20 @@ const columns: Column<FinanceRule>[] = [
   },
 ];
 
+/** Edit (as a new version), version history and stop / resume, for users who may change rules. */
+const actionsColumn: Column<FinanceRule> = {
+  key: "actions",
+  header: "إجراءات",
+  cell: (r) => (
+    <div className="flex items-center gap-2">
+      <ButtonLink href={`/settings/finance-rules/${r.key}/edit`} variant="outline" className="w-24">
+        تعديل
+      </ButtonLink>
+      <RuleStatusButton ruleKey={r.key} active={r.isActive} />
+    </div>
+  ),
+};
+
 const sections: Record<string, string> = {
   settlement: "سياسة التسوية المبكرة",
   general: "الإعدادات العامة",
@@ -76,7 +91,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
         action={
           canEdit && (
             <ButtonLink href="/settings/finance-rules/new" className="max-lg:w-full lg:w-40">
-              قاعدة تمويل جديدة
+              خطة تقسيط جديدة
             </ButtonLink>
           )
         }
@@ -93,7 +108,7 @@ export default async function SettingsPage({ searchParams }: PageProps<"/setting
             </ButtonLink>
           </ActionBar>
           <Panel title="قواعد التمويل">
-            <DataTable caption="قواعد التمويل" columns={columns} rows={rules} rowKey={(r) => r.id} />
+            <DataTable caption="قواعد التمويل" columns={canEdit ? [...columns, actionsColumn] : columns} rows={rules} rowKey={(r) => r.id} />
             <Pagination total={rules.length} />
           </Panel>
           <Notice>

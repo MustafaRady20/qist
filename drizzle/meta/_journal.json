@@ -29,6 +29,13 @@
       "when": 1791230555728,
       "tag": "0003_stored_files",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791297972436,
+      "tag": "0004_contract_profit_base_and_custom_installments",
+      "breakpoints": true
     }
   ]
 }

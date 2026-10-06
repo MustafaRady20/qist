@@ -13,7 +13,6 @@
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx --env-file=.env.local scripts/seed.ts",
-    "db:seed:demo": "tsx --env-file=.env.local scripts/seed.ts --demo",
     "test": "vitest run"
   },
   "dependencies": {
