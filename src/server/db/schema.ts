@@ -6,12 +6,14 @@ import {
   check,
   customType,
   date,
+  foreignKey,
   index,
   integer,
   jsonb,
   pgEnum,
   pgSequence,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -269,6 +271,9 @@ export const contracts = pgTable(
     productDescription: text("product_description").notNull(),
     quantity: smallint("quantity").notNull().default(1),
     supplier: text("supplier"),
+    /** What the goods cost the shop. Internal: shown to staff only, never on customer-facing documents. */
+    originalPrice: money("original_price").notNull(),
+    /** Selling price charged to the customer; the down payment and the plan are calculated on it. */
     purchaseCost: money("purchase_cost").notNull(),
     downPayment: money("down_payment").notNull().default(0),
 
@@ -298,6 +303,7 @@ export const contracts = pgTable(
     index("contracts_status_idx").on(t.status),
     index("contracts_group_idx").on(t.groupId),
     check("contracts_amounts_check", sql`${t.purchaseCost} > 0 AND ${t.downPayment} >= 0 AND ${t.downPayment} < ${t.purchaseCost}`),
+    check("contracts_original_price_check", sql`${t.originalPrice} > 0`),
     check("contracts_principal_check", sql`${t.principal} = ${t.purchaseCost} - ${t.downPayment}`),
     check("contracts_total_check", sql`${t.totalInstallments} = ${t.principal} + ${t.profit} + ${t.fees}`),
   ],
@@ -373,6 +379,73 @@ export const contractSettlements = pgTable(
   ],
 );
 
+// ── Payments ────────────────────────────────────────────────────────────────
+
+export const paymentCodeSeq = pgSequence("payment_code_seq", { startWith: 1001 });
+
+/** A reversal is its own row pointing at the payment it cancels; payments are never edited or deleted. */
+export const paymentKind = pgEnum("payment_kind", ["payment", "reversal"]);
+
+/**
+ * Money received on a contract's installments, and the reversals of it. The
+ * down payment (`contracts.down_payment`) and early settlements
+ * (`contract_settlements`) are recorded on their own rows and are not repeated here.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** PAY-1001 */
+    code: text("code")
+      .notNull()
+      .default(sql`'PAY-' || nextval('payment_code_seq')`),
+    contractId: uuid("contract_id")
+      .notNull()
+      .references(() => contracts.id),
+    kind: paymentKind("kind").notNull().default("payment"),
+    amount: money("amount").notNull(),
+    method: paymentMethod("method").notNull(),
+    reference: text("reference"),
+    /** Cairo business date the money was received (or the reversal was made). */
+    paidOn: date("paid_on").notNull(),
+    note: text("note"),
+    /** Set on reversals: the payment being cancelled. Unique, so a payment is reversed at most once. */
+    reversesId: uuid("reverses_id"),
+    /** Client-generated key: resubmitting the same form never records the money twice. */
+    idempotencyKey: uuid("idempotency_key"),
+    receivedBy: uuid("received_by").references(() => users.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("payments_code_key").on(t.code),
+    uniqueIndex("payments_reverses_key").on(t.reversesId),
+    uniqueIndex("payments_idempotency_key").on(t.idempotencyKey),
+    index("payments_contract_idx").on(t.contractId, t.paidOn),
+    foreignKey({ columns: [t.reversesId], foreignColumns: [t.id], name: "payments_reverses_id_fk" }),
+    check("payments_amount_check", sql`${t.amount} > 0`),
+    check("payments_reversal_check", sql`(${t.kind} = 'reversal') = (${t.reversesId} IS NOT NULL)`),
+  ],
+);
+
+/** How a payment was spread over installments (oldest first); summed into `installments.paid_amount`. */
+export const paymentAllocations = pgTable(
+  "payment_allocations",
+  {
+    paymentId: uuid("payment_id")
+      .notNull()
+      .references(() => payments.id),
+    installmentId: uuid("installment_id")
+      .notNull()
+      .references(() => installments.id),
+    amount: money("amount").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.paymentId, t.installmentId] }),
+    index("payment_allocations_installment_idx").on(t.installmentId),
+    check("payment_allocations_amount_check", sql`${t.amount} > 0`),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type UserRole = (typeof userRole.enumValues)[number];
 export type Customer = typeof customers.$inferSelect;
@@ -386,3 +459,5 @@ export type Installment = typeof installments.$inferSelect;
 export type ContractGroup = typeof contractGroups.$inferSelect;
 export type ContractSettlement = typeof contractSettlements.$inferSelect;
 export type PaymentMethod = (typeof paymentMethod.enumValues)[number];
+export type Payment = typeof payments.$inferSelect;
+export type PaymentKind = (typeof paymentKind.enumValues)[number];

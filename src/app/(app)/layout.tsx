@@ -7,10 +7,15 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   const user = await requirePageUser();
   return (
     <div className="flex min-h-dvh flex-1">
-      <Sidebar />
+      {/* The shell is chrome: printed pages (account statements) carry only their content. */}
+      <div className="contents print:hidden">
+        <Sidebar />
+      </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar user={user} />
-        <main className="flex flex-1 flex-col gap-6 p-6 lg:px-8 lg:pt-6 lg:pb-8">{children}</main>
+        <div className="contents print:hidden">
+          <Topbar user={user} />
+        </div>
+        <main className="flex flex-1 flex-col gap-6 p-6 lg:px-8 lg:pt-6 lg:pb-8 print:p-0!">{children}</main>
       </div>
     </div>
   );

@@ -18,6 +18,7 @@ import {
   type ProfitBase,
 } from "@/server/db/schema";
 import { AppError, notFound } from "@/server/errors";
+import { installmentStatus, type InstallmentStatus } from "@/server/finance/installments";
 import { buildFlatSchedule, flatProfit, type Schedule } from "@/server/finance/schedule";
 import { getUsableRule } from "@/server/finance-rules/service";
 import { todayInCairo } from "@/server/time";
@@ -31,7 +32,10 @@ export const contractInputSchema = z.object({
   productDescription: z.string().trim().min(2, { error: "أدخل المنتج ومواصفاته" }).max(300),
   quantity: z.number().int().min(1).max(999).default(1),
   supplier: optionalText(120),
-  purchaseCost: moneySchema.min(1, { error: "أدخل تكلفة الشراء" }),
+  /** What the goods cost the shop (internal). Defaults to the selling price when left out. */
+  originalPrice: moneySchema.min(1, { error: "أدخل السعر الأصلي" }).optional(),
+  /** Selling price to the customer; the plan is calculated on it. */
+  purchaseCost: moneySchema.min(1, { error: "أدخل سعر البيع" }),
   downPayment: moneySchema.default(0),
   financeRuleId: z.uuid({ error: "اختر خطة التقسيط" }),
   /** What the plan's rate is charged on: the financed amount, or the full price before the down payment. */
@@ -71,7 +75,7 @@ export type ContractPlan = {
 /** Validates the plan against its rule version and computes the schedule. */
 function computePlan(data: ParsedInput, rule: FinanceRule, today: string): ContractPlan {
   const errors: Record<string, string> = {};
-  if (data.downPayment >= data.purchaseCost) errors.downPayment = "المقدم يجب أن يكون أقل من تكلفة الشراء";
+  if (data.downPayment >= data.purchaseCost) errors.downPayment = "المقدم يجب أن يكون أقل من سعر البيع";
   const minDown = Math.ceil((data.purchaseCost * rule.minDownPaymentBp) / 10_000);
   if (data.downPayment < minDown) {
     errors.downPayment = `الحد الأدنى للمقدم ${rule.minDownPaymentBp / 100}% (${(minDown / 100).toFixed(2)} جنيه)`;
@@ -130,6 +134,8 @@ export async function previewContract(input: ContractInput): Promise<ContractPla
 }
 
 // ── Queries ─────────────────────────────────────────────────────────────────
+
+export { installmentStatus, type InstallmentStatus };
 
 export type ContractTab = "active" | "draft" | "completed" | "overdue" | "settled" | "consolidated";
 export type DerivedContractStatus = Contract["status"] | "overdue";
@@ -304,21 +310,6 @@ export async function listNextInstallments(customerId: string): Promise<Upcoming
     .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || a.contractCode.localeCompare(b.contractCode));
 }
 
-export type InstallmentStatus = "paid" | "waived" | "partial" | "overdue" | "due" | "upcoming";
-
-export function installmentStatus(
-  i: { amount: number; paidAmount: number; waivedAmount?: number; dueDate: string },
-  today: string,
-): InstallmentStatus {
-  if (i.paidAmount >= i.amount) return "paid";
-  // Closed by an early settlement with part of it forgiven.
-  if (i.paidAmount + (i.waivedAmount ?? 0) >= i.amount) return "waived";
-  if (i.paidAmount > 0) return "partial";
-  if (i.dueDate < today) return "overdue";
-  if (i.dueDate === today) return "due";
-  return "upcoming";
-}
-
 /** Contract with its full schedule (Figma "contract-detail"). Accepts UUID or code (CT-1024). */
 export async function getContract(idOrCode: string) {
   await requirePermission("contracts:read");
@@ -395,6 +386,7 @@ function planColumns(plan: ContractPlan, data: ParsedInput) {
     productDescription: data.productDescription,
     quantity: data.quantity,
     supplier: data.supplier ?? null,
+    originalPrice: data.originalPrice ?? plan.purchaseCost,
     purchaseCost: plan.purchaseCost,
     downPayment: plan.downPayment,
     principal: plan.principal,
@@ -431,6 +423,7 @@ function contractAudit(c: Contract) {
     status: c.status,
     customerId: c.customerId,
     product: c.productDescription,
+    originalPrice: c.originalPrice,
     purchaseCost: c.purchaseCost,
     downPayment: c.downPayment,
     principal: c.principal,
@@ -525,6 +518,7 @@ export async function confirmDraft(idOrCode: string) {
       productDescription: draft.productDescription,
       quantity: draft.quantity,
       supplier: draft.supplier,
+      originalPrice: draft.originalPrice,
       purchaseCost: draft.purchaseCost,
       downPayment: draft.downPayment,
       financeRuleId: draft.financeRuleId,

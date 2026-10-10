@@ -24,7 +24,7 @@ Sign in with `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD`. To reset the admin pass
 | `db:generate` | Create a migration after editing `src/server/db/schema.ts` |
 | `db:migrate` | Apply migrations |
 | `db:studio` | Drizzle Studio |
-| `test` | Unit tests (schedule, settlement and period math) |
+| `test` | Unit tests (schedule, settlement, period, payment allocation and account statement) |
 
 ## Deploy (Vercel)
 
@@ -59,8 +59,12 @@ src/server/
   auth/                sessions, Argon2id passwords, DAL (getCurrentUser / requirePermission), roles
   customers/ contracts/ finance-rules/ audit-log/   domain services
   installments/ dashboard/ reports/                 read models over contracts and installments
+  payments/            receive and reverse installment payments (the payments ledger)
+  statements/          customer account statement (loads rows, delegates to finance/statement.ts)
   finance/period.ts    reporting periods (pure, unit-tested)
   finance/schedule.ts  flat-rate schedule (pure, unit-tested)
+  finance/installments.ts  installment status and oldest-first payment allocation (pure, unit-tested)
+  finance/statement.ts     account statement ledger, balances and CSV (pure, unit-tested)
   db/schema.ts         tables, constraints, enums
 ```
 
@@ -74,8 +78,11 @@ convenience redirect). Rules the code enforces:
 - **Documents** are served only through the API. They are stored on disk under `STORAGE_DIR` (default `./storage`, git-ignored; back it up with the database), or in the `stored_files` table when `STORAGE_DRIVER=database`.
 - **Early settlement** (`finance/settlement.ts`, unit-tested): amount = remaining principal + profit of installments already due + outstanding fees. Profit of future installments is waived (`installments.waived_amount`), never recorded as paid. The acting user re-enters their password, and the quote is re-checked against the amount they reviewed.
 - **Contract groups** are a follow-up label only: grouped contracts stay active with their own schedules. The `consolidated` list tab filters on group membership; a group dissolves itself when fewer than two active contracts remain.
-- **Collection is measured against due dates.** Installment payments have no date of their own until the payments module exists, so the dashboard and reports count "collected in a month" as what has been paid on the installments falling due in that month. Paid money covers fees, then profit, then principal.
+- **Payments** (`payments`, `payment_allocations`): money received on an active contract is applied to its installments oldest first and summed into `installments.paid_amount`. An amount above what is still owed is refused, so nothing is left unapplied. A payment is never edited or deleted: it is cancelled by a reversal row (at most one per payment), which takes the money back off the same installments. Paying a contract off closes it as `completed`; reversing that payment reopens it. Payments on a contract closed by early settlement can't be reversed. The form sends an idempotency key, so a resubmission returns the first payment.
+- **Account statement** (`finance/statement.ts`): debit = what the customer owes (sale, fees, reversed payment), credit = what reduces it (down payment, payments, settlement amount, profit waived by a settlement); the running balance is what is still owed. Each amount comes from one record only: the down payment from the contract (dated on its confirmation), installment money from `payments`, settlement money and the waiver from `contract_settlements`. Scheduled installments are never counted as received. Drafts and cancelled drafts have no entries. The statement is customer-facing: the purchase cost (original price) is never part of it, on screen, in print, in the CSV or in the API response. A period shows the opening balance carried from before it; the current balance is always shown separately. The page warns when the ledger and `installments.paid_amount` disagree. Print and "PDF" use the browser's print dialog with a print layout; the transactions export as CSV.
+- **Collection is measured against due dates.** The dashboard and reports still count "collected in a month" as what has been paid on the installments falling due in that month. Paid money covers fees, then profit, then principal.
 - **Reports** compare each period with the one before it (whole months step back by months, other ranges by their length) and export as CSV with amounts in pounds.
+- **Two prices per contract:** `original_price` is what the goods cost the shop; it is internal (contract pages, sales report) and never appears on the account statement. `purchase_cost` is the selling price charged to the customer, and the down payment, profit and installments are calculated on it. `originalPrice` is optional in the API and defaults to the selling price.
 - **Schedule:** profit = profit base × annual rate × months ÷ 12, where the base is chosen per contract in the wizard (`contracts.profit_base`): the principal (price − down payment) or the full purchase cost. Installments are rounded to the piastre, rounding difference in the last one.
 - **Manual installments:** a contract may fix the amount of any installment (`contracts.custom_installments`, `customInstallments: [{ seq, amount }]` in the API); the others share what is left of the total equally. Profit and fees are then spread in proportion to each installment's amount.
 
@@ -90,6 +97,9 @@ convenience redirect). Rules the code enforces:
 | finance rules: write | ✓ | | | |
 | audit log: read | ✓ | ✓ | | |
 | reports: read, export | ✓ | ✓ | | ✓ |
+| account statement: view, print, export | ✓ | ✓ | ✓ | ✓ |
+| payments: record | ✓ | ✓ | ✓ | |
+| payments: reverse | ✓ | ✓ | | |
 
 ## API (`/api/v1`)
 
@@ -107,6 +117,7 @@ Amounts are **piastres**, dates `YYYY-MM-DD`. Errors: `{ error: { code, message,
 | POST | `/customers` | Create; `409` with `details.existing` if phone / national ID already exists |
 | GET, PATCH | `/customers/:id` | `id` = UUID or code (`C-1042`) |
 | POST | `/customers/:id/block` | `{ blocked, reason }` |
+| GET | `/customers/:id/statement?period=&from=&to=&type=&contract=&installments=&format=` | Account statement; period: `all` `month` `lastMonth` `custom`; type: `sale` `fee` `down_payment` `payment` `reversal` `settlement` `discount`; installments: `paid` `partial` `unpaid` `overdue`; `format=csv` downloads the transactions |
 | GET | `/customers/:id/activity` | Latest audit entries about the customer and their contracts |
 | GET | `/customers/:id/documents` | Document list (names, types, dates) |
 | POST | `/customers/:id/documents` | `multipart/form-data` `{ kind, file }` — PDF / JPG / PNG ≤ 10 MB (`NEXT_PUBLIC_MAX_DOCUMENT_MB`); kind: `national_id` `income_proof` `contract` `guarantor_id` `other` |
@@ -126,6 +137,9 @@ Amounts are **piastres**, dates `YYYY-MM-DD`. Errors: `{ error: { code, message,
 | POST | `/finance-rules` | New rule version (owner) |
 | GET | `/finance-rules/:key/versions` | Version history |
 | GET | `/dashboard?period=&from=&to=` | KPIs, overdue aging, monthly expected vs collected, due today, follow-ups; period: `month` `today` `week` `custom` |
+| GET | `/payments?q=&page=` | Recorded payments and reversals |
+| POST | `/payments` | `{ contract, amount, method, reference?, paidOn?, note?, idempotencyKey? }` — active contracts; `422` above the outstanding balance |
+| POST | `/payments/:id/reverse` | `{ reason }` — reversing entry (`id` = UUID or `PAY-1001`); `409` if already reversed |
 | GET | `/installments?tab=&q=&page=` | One row per installment plus `summary`; tab: `all` (unpaid) `today` `overdue` `upcoming` `partial` `paid` |
 | GET | `/reports` | Report catalogue |
 | GET | `/reports/:slug?period=&from=&to=&format=` | KPIs, columns and rows; period: `year` `quarter` `month` `custom`; `format=csv` downloads the table |
@@ -136,7 +150,7 @@ Contract input:
 ```json
 {
   "customerId": "uuid", "productDescription": "هاتف Samsung Galaxy", "quantity": 1, "supplier": "متجر المورد",
-  "purchaseCost": 6000000, "downPayment": 1000000, "financeRuleId": "uuid",
+  "originalPrice": 5500000, "purchaseCost": 6000000, "downPayment": 1000000, "financeRuleId": "uuid",
   "termMonths": 12, "fees": 0, "firstDueDate": "2027-01-01", "confirm": false
 }
 ```

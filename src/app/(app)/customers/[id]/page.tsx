@@ -138,6 +138,9 @@ export default async function CustomerProfilePage({ params, searchParams }: Page
             تجميع العقود
           </ButtonLink>
         )}
+        <ButtonLink href={`/customers/${c.code}/statement`} variant="outline">
+          كشف الحساب
+        </ButtonLink>
         <ButtonLink href={`https://wa.me/2${whatsapp}`} target="_blank" rel="noopener" variant="whatsapp">
           إرسال واتساب
         </ButtonLink>

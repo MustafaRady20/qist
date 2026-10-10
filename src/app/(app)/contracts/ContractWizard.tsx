@@ -30,6 +30,7 @@ export type WizardDraft = {
   productDescription: string;
   quantity: number;
   supplier: string | null;
+  originalPrice: number;
   purchaseCost: number;
   downPayment: number;
   financeRuleId: string;
@@ -48,6 +49,7 @@ const fieldStep: Record<string, number> = {
   productDescription: 2,
   quantity: 2,
   supplier: 2,
+  originalPrice: 2,
   purchaseCost: 2,
   downPayment: 3,
   financeRuleId: 4,
@@ -100,6 +102,7 @@ export function ContractWizard({
   const [customer, setCustomer] = useState<CustomerOption | null>(initialCustomer ?? null);
   const [product, setProduct] = useState(draft?.productDescription ?? "");
   const [quantity, setQuantity] = useState(String(draft?.quantity ?? 1));
+  const [original, setOriginal] = useState(draft ? editable(draft.originalPrice) : "");
   const [cost, setCost] = useState(draft ? editable(draft.purchaseCost) : "");
   const [supplier, setSupplier] = useState(draft?.supplier ?? "");
   const [down, setDown] = useState(draft ? editable(draft.downPayment) : "0");
@@ -117,6 +120,7 @@ export function ContractWizard({
   const [pending, startTransition] = useTransition();
 
   const rule = rules.find((r) => r.id === ruleId);
+  const originalP = parseAmount(original);
   const costP = parseAmount(cost);
   const downP = parseAmount(down);
   const feesP = parseAmount(fees);
@@ -140,11 +144,12 @@ export function ContractWizard({
     if (n === 2) {
       if (product.trim().length < 2) e.productDescription = "أدخل المنتج ومواصفاته";
       if (!(qty >= 1 && qty <= 999)) e.quantity = "الكمية من 1 إلى 999";
-      if (!costP) e.purchaseCost = "أدخل تكلفة الشراء";
+      if (!originalP) e.originalPrice = "أدخل السعر الأصلي";
+      if (!costP) e.purchaseCost = "أدخل سعر البيع";
     }
     if (n === 3) {
       if (downP === null) e.downPayment = "أدخل مبلغ المقدم (0 إن لم يوجد)";
-      else if (costP && downP >= costP) e.downPayment = "المقدم يجب أن يكون أقل من تكلفة الشراء";
+      else if (costP && downP >= costP) e.downPayment = "المقدم يجب أن يكون أقل من سعر البيع";
     }
     if (n === 4) {
       if (!rule) e.financeRuleId = "اختر خطة التقسيط";
@@ -252,6 +257,7 @@ export function ContractWizard({
       productDescription: product,
       quantity: qty,
       supplier,
+      originalPrice: originalP!,
       purchaseCost: costP!,
       downPayment: downP!,
       financeRuleId: rule.id,
@@ -330,7 +336,15 @@ export function ContractWizard({
                 className="md:col-span-2"
               />
               <TextField label="الكمية" kind="currency" inputMode="numeric" value={quantity} onChange={(e) => setQuantity(e.target.value)} error={errors.quantity} />
-              <TextField label="تكلفة الشراء (جنيه)" kind="currency" placeholder="60000" value={cost} onChange={(e) => setCost(e.target.value)} error={errors.purchaseCost} />
+              <TextField
+                label="السعر الأصلي (جنيه) • داخلي"
+                kind="currency"
+                placeholder="55000"
+                value={original}
+                onChange={(e) => setOriginal(e.target.value)}
+                error={errors.originalPrice}
+              />
+              <TextField label="سعر البيع (جنيه)" kind="currency" placeholder="60000" value={cost} onChange={(e) => setCost(e.target.value)} error={errors.purchaseCost} />
               <TextField
                 label="المورد / مكان الشراء (اختياري)"
                 value={supplier}
@@ -344,7 +358,8 @@ export function ContractWizard({
           <Panel title="ملخص عملية الشراء">
             <DetailList
               items={[
-                { label: "تكلفة الشراء", value: <span className="num">{costP ? money(costP) : "—"}</span> },
+                { label: "السعر الأصلي (لا يظهر للعميل)", value: <span className="num">{originalP ? money(originalP) : "—"}</span> },
+                { label: "سعر البيع", value: <span className="num">{costP ? money(costP) : "—"}</span> },
                 { label: "المورد", value: supplier.trim() || "—" },
                 { label: "نوع العملية", value: "شراء للعميل ثم بيع بالتقسيط" },
               ]}
@@ -359,7 +374,7 @@ export function ContractWizard({
           <Panel title="مبلغ التمويل">
             <DetailList
               items={[
-                { label: "تكلفة الشراء المعتمدة", value: <span className="num">{costP ? money(costP) : "—"}</span> },
+                { label: "سعر البيع المعتمد", value: <span className="num">{costP ? money(costP) : "—"}</span> },
                 { label: "المقدم", value: <span className="num">{downP !== null ? money(downP) : "—"}</span> },
                 { label: "أصل المبلغ المموّل", value: <span className="num">{principal !== null && principal > 0 ? money(principal) : "—"}</span> },
               ]}
@@ -487,7 +502,8 @@ export function ContractWizard({
                   ),
                 },
                 { label: "بيانات الشراء", value: `${product.trim()} × ${qty}` },
-                { label: "تكلفة الشراء", value: <span className="num">{money(costP!)}</span> },
+                { label: "السعر الأصلي (لا يظهر للعميل)", value: <span className="num">{money(originalP!)}</span> },
+                { label: "سعر البيع", value: <span className="num">{money(costP!)}</span> },
                 { label: "المقدم", value: <span className="num">{money(downP!)}</span> },
                 { label: "أصل التمويل", value: <span className="num">{money(schedule.principal)}</span> },
                 { label: "العائد", value: <span className="num">{money(schedule.profit)}</span> },
