@@ -15,6 +15,9 @@ export const permissions = {
   "contracts:confirm": ["owner", "manager"],
   // Early settlement closes a contract and forgives future profit.
   "contracts:settle": ["owner", "manager"],
+  // Receive installment money; reversing a recorded payment is a correction for managers.
+  "payments:write": ["owner", "manager", "collector"],
+  "payments:reverse": ["owner", "manager"],
   "finance-rules:read": ["owner", "manager", "collector", "viewer"],
   "finance-rules:write": ["owner"],
   "audit:read": ["owner", "manager"],

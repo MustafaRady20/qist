@@ -91,6 +91,12 @@ export default async function ContractDetailPage({ params, searchParams }: PageP
         <ButtonLink href={`/customers/${c.customer.code}`} variant="outline">
           ملف العميل
         </ButtonLink>
+        {!draft && c.status !== "cancelled" && (
+          <ButtonLink href={`/customers/${c.customer.code}/statement?contract=${c.code}`} variant="outline">
+            كشف الحساب
+          </ButtonLink>
+        )}
+        {open && can(user.role, "payments:write") && <ButtonLink href={`/payments/new?contract=${c.code}`}>تسجيل دفعة</ButtonLink>}
         {open && canWrite && !c.group && (
           <ButtonLink href={`/contracts/consolidate?customer=${c.customer.code}`} variant="outline">
             تجميع عقود العميل
@@ -192,7 +198,8 @@ export default async function ContractDetailPage({ params, searchParams }: PageP
               },
               { label: "بيانات الشراء", value: `${c.productDescription} × ${c.quantity}` },
               { label: "المورد", value: c.supplier || "—" },
-              { label: "تكلفة الشراء", value: num(money(c.purchaseCost)) },
+              { label: "السعر الأصلي (داخلي • لا يظهر للعميل)", value: num(money(c.originalPrice)) },
+              { label: "سعر البيع", value: num(money(c.purchaseCost)) },
               { label: "المقدم", value: num(money(c.downPayment)) },
               { label: "سعر البيع بالتقسيط", value: num(money(c.downPayment + c.totalInstallments)) },
               { label: "خطة التقسيط", value: <>{c.rule.name} • {num(rate)} سنوي ثابت • الإصدار {num(String(c.rule.version))}</> },

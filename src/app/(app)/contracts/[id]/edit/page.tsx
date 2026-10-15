@@ -39,6 +39,7 @@ export default async function EditDraftPage({ params }: PageProps<"/contracts/[i
           productDescription: c.productDescription,
           quantity: c.quantity,
           supplier: c.supplier,
+          originalPrice: c.originalPrice,
           purchaseCost: c.purchaseCost,
           downPayment: c.downPayment,
           financeRuleId: c.financeRuleId,

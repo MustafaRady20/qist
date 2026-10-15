@@ -111,3 +111,16 @@ body {
   font-size: 14px;
   line-height: 24px;
 }
+
+/* Printed documents (account statement): white A4 page, colors kept for badges and totals. */
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+  body {
+    background: #fff;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+}

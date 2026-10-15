@@ -18,6 +18,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/installments", label: "الأقساط", icon: "calendar" },
       { href: "/payments", label: "المدفوعات", icon: "wallet" },
+      { href: "/statements", label: "كشف الحساب", icon: "statement" },
       { href: "/collections", label: "متابعة السداد", icon: "collections" },
       { href: "/overdue", label: "المتأخرات", icon: "alert" },
       { href: "/whatsapp", label: "واتساب", icon: "chat" },

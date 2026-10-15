@@ -74,19 +74,20 @@ const reportDefs = {
       col("customer", "العميل"),
       col("date", "تاريخ التأكيد", "date"),
       col("product", "المشتريات"),
-      col("purchase_cost", "تكلفة الشراء", "money"),
+      col("original_price", "السعر الأصلي", "money"),
+      col("purchase_cost", "سعر البيع", "money"),
       col("down_payment", "المقدم", "money"),
       col("sale_price", "سعر البيع بالتقسيط", "money"),
     ],
     query: (r) => sql`
       select c.code as contract, cu.full_name as customer, ${confirmedOn} as date, c.product_description as product,
-        c.purchase_cost, c.down_payment, c.down_payment + c.total_installments as sale_price
+        c.original_price, c.purchase_cost, c.down_payment, c.down_payment + c.total_installments as sale_price
       from contracts c join customers cu on cu.id = c.customer_id
       where ${confirmed} and ${inRange(confirmedOn, r)}
       order by date desc, c.code desc`,
     kpis: (rows) => [
       count("عدد العقود", rows.length),
-      money("تكلفة الشراء", sum(rows, "purchase_cost")),
+      money("سعر البيع", sum(rows, "purchase_cost")),
       money("المقدمات", sum(rows, "down_payment")),
       money("قيمة البيع بالتقسيط", sum(rows, "sale_price")),
     ],
